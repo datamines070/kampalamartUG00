@@ -5617,7 +5617,63 @@ main{
 <link rel="apple-touch-icon" href="/icon-512.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"><meta http-equiv="Pragma" content="no-cache"><meta http-equiv="Expires" content="0"></head>
-<body><script>window.__KM_VERSION="V66-Render-NoError-Approval";console.log("Kampala Mart V64");</script><script>
+<body>
+<script>
+// --- RENDER SHARED SYNC: Make products show in EVERY browser, not just yours ---
+// Problem: Shop was saving to localStorage (this browser only) + Supabase/Firebase (not configured on Render)
+// Fix: Every save to localStorage also POSTs to Render server /api/data. Every load GETs from Render server.
+(function(){
+  try{ localStorage.setItem('km_cloud_settings', JSON.stringify({url: window.location.origin, key:'render-public', enabled:true, status:'Render server - shared'})); }catch(e){}
+  var _origSet = localStorage.setItem.bind(localStorage);
+  var _timer = null;
+  function pushToServer(){
+    try{
+      var dbStr = localStorage.getItem('km_db_v63');
+      if(!dbStr) return;
+      var db = JSON.parse(dbStr);
+      fetch('/api/data', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({data: db})}).then(function(r){ console.log('Pushed to Render server', r.status); }).catch(function(){});
+      // Also try Supabase-style endpoint for compatibility
+      fetch('/rest/v1/km_data', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id:1, data: db})}).catch(function(){});
+    }catch(e){}
+  }
+  // Monkey-patch setItem: whenever shop saves, also push to Render server (debounced 1s)
+  localStorage.setItem = function(k,v){
+    var r = _origSet(k,v);
+    if(k && (k.indexOf('km_db')!==-1 || k.indexOf('km_cloud')!==-1)){
+      if(_timer) clearTimeout(_timer);
+      _timer = setTimeout(pushToServer, 1000);
+    }
+    return r;
+  };
+  // On load: if server has products but this browser has 0, pull from server and reload
+  function pullFromServer(){
+    fetch('/api/data').then(function(r){ return r.json(); }).then(function(serverDb){
+      if(!serverDb || !serverDb.products) return;
+      var localStr = localStorage.getItem('km_db_v63');
+      var localDb = null;
+      try{ localDb = JSON.parse(localStr||'null'); }catch(e){}
+      var localCount = localDb && localDb.products ? localDb.products.length : 0;
+      var serverCount = serverDb.products.length;
+      // If server has more products than local, server wins - use server data
+      if(serverCount > localCount){
+        _origSet('km_db_v63', JSON.stringify(serverDb));
+        console.log('Pulled '+serverCount+' products from Render server, reloading');
+        setTimeout(function(){ location.reload(); }, 500);
+      } else if(localCount > 0 && serverCount===0){
+        // This browser has products, server is empty -> push local to server (this fixes your 456789 case)
+        console.log('Local has '+localCount+', server empty - pushing local to server');
+        pushToServer();
+      }
+    }).catch(function(){});
+  }
+  // Pull after 1.5s (let React init first), then every 10s to catch new approvals
+  setTimeout(pullFromServer, 1500);
+  setInterval(pullFromServer, 10000);
+  // Also push on page hide (so your Approve / Sell is saved even if you close tab fast)
+  window.addEventListener('beforeunload', function(){ try{ pushToServer(); }catch(e){} });
+})();
+</script>
+<script>window.__KM_VERSION="V67-Render-Shared-EveryBrowser";console.log("Kampala Mart V64");</script><script>
 (function(){
   try{
     var BUILT_URL = "RENDER_ORIGIN";
